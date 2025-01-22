@@ -1,0 +1,409 @@
+#!/usr/bin/env node
+
+var app = require('../app');
+var debug = require('debug')('backend:server');
+var http = require('http');
+const socketIo = require('socket.io');
+
+var db = require('../config/connection')
+var collection = require('../config/collection')
+const { ObjectId } = require('mongodb');
+
+// Port normalization
+var port = normalizePort(process.env.PORT || '5000');
+app.set('port', port);
+
+// Create HTTP server
+var server = http.createServer(app);
+
+
+// Create Socket.IO server with enhanced configuration
+const io = socketIo(server, {
+  cors: {
+    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    methods: ["GET", "POST"],
+    credentials: true
+  },
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  transports: ['websocket', 'polling']
+});
+
+// Store active connections
+const connectedUsers = new Map();
+const messageStatuses = new Map(); // Track message statuses
+const userStatus = new Map(); // Track current status to prevent unnecessary updates
+const typingUsers = new Map(); // Track who is typing in which conversation
+
+
+// Socket.IO connection handler
+
+io.on('connection', (socket) => {
+  console.log('A user connected:', socket.id);
+  
+  // Keep track of the user's active rooms and status
+  const userRooms = new Set();
+  
+   // Handle user coming online
+   socket.on('userOnline', async (data) => {
+    if (!data.userId) return;
+    
+    try {
+      const userIdObject = new ObjectId(data.userId);
+      
+      // Check if user is already marked as online
+      if (userStatus.get(data.userId) === 'online') {
+        // Just update the socket ID if needed
+        connectedUsers.set(data.userId, socket.id);
+        return;
+      }
+
+      // Update user status in memory and database
+      userStatus.set(data.userId, 'online');
+      connectedUsers.set(data.userId, socket.id);
+
+ // Broadcast to all users including sender
+      io.emit('userStatusChanged', {
+        userId: data.userId,
+        status: 'online'
+      });
+
+      await db.get().collection(collection.USER_COLLECTION).updateOne(
+        { _id: userIdObject },
+        {
+          $set: {
+            status: 'online'
+          }
+        }
+      ); 
+
+     
+
+      console.log(`User online: ${data.userId} -> Socket ID: ${socket.id}`);
+    } catch (err) {
+      console.error('Error updating user online status:', err);
+    }
+  });
+
+
+  // Handle sending messages
+  socket.on('sendMessage', (message) => {
+    console.log('Message received:', message);
+    console.log('Sender Rooms:', socket.rooms);
+
+    // Send the message to the receiver's room
+    socket.to(message.receiverId).emit('receiveMessage', message);
+    console.log(`Message sent to room ${message.receiverId}`);
+  });
+
+
+// Handle typing status
+socket.on('typing', (data) => {
+  const { userId, receiverId } = data;
+  if (!userId || !receiverId) return;
+
+  // Save typing status
+  typingUsers.set(`${userId}-${receiverId}`, Date.now());
+ console.log('the user is typing in serever',receiverId);
+ 
+  // Emit to the receiver
+  const receiverSocketId = connectedUsers.get(receiverId);
+  if (receiverSocketId) {
+    io.to(receiverSocketId).emit('userTyping', {
+      userId: userId,
+      isTyping: true
+    });
+  }
+});
+
+// Handle stopped typing
+socket.on('stopTyping', (data) => {
+  const { userId, receiverId } = data;
+  if (!userId || !receiverId) return;
+
+  // Remove typing status
+  typingUsers.delete(`${userId}-${receiverId}`);
+console.log('The user is stop typing');
+
+  // Emit to the receiver
+  const receiverSocketId = connectedUsers.get(receiverId);
+  if (receiverSocketId) {
+    io.to(receiverSocketId).emit('userTyping', {
+      userId: userId,
+      isTyping: false
+    });
+  }
+});
+
+
+  socket.on('markAsSeen', async (data) => {
+    const { messageId, senderId, receiverId } = data;
+
+    try {
+      // First, emit the socket event to notify the sender immediately
+      const senderSocketId = connectedUsers.get(senderId);
+      if (senderSocketId) {
+        io.to(senderSocketId).emit('messageSeen', {
+          messageId,
+          receiverId,
+          status: 'seen'
+        });
+      }
+
+      // Update the database
+      const result = await db.get().collection(collection.MESSAGES_COLLECTION)
+        .updateOne(
+          {
+            $or: [
+              {
+                participants: [
+                  { userId: senderId },
+                  { userId: receiverId }
+                ]
+              },
+              {
+                participants: [
+                  { userId: receiverId },
+                  { userId: senderId }
+                ]
+              }
+            ],
+            "messages.messageId": messageId
+          },
+          {
+            $set: { 
+              "messages.$[element].status": "seen",
+              "messages.$[element].seenAt": new Date()
+            }
+          },
+          {
+            arrayFilters: [{ "element.messageId": messageId }]
+          }
+        );
+
+      console.log('Update result:', result);
+    } catch (err) {
+      console.error(`Error updating seen status for message ${messageId}:`, err);
+      if (senderSocketId) {
+        io.to(senderSocketId).emit('messageSeenError', {
+          messageId,
+          receiverId,
+          error: 'Failed to mark message as seen'
+        });
+      }
+    }
+  });
+
+  // Handle user going offline manually
+   // Handle user going offline manually
+   socket.on('userOffline', async (data) => {
+    if (!data.userId) return;
+    
+    try {
+      // Check if user is already marked as offline
+      if (userStatus.get(data.userId) === 'offline') {
+        return;
+      }
+
+      const userIdObject = new ObjectId(data.userId);
+      const lastSeen = new Date();
+
+      // Update status in memory and database
+      userStatus.set(data.userId, 'offline');
+
+  // Broadcast to all users including sender
+      io.emit('userStatusChanged', {
+        userId: data.userId,
+        status: 'offline',
+        lastSeen: lastSeen
+      });
+
+      await db.get().collection(collection.USER_COLLECTION).updateOne(
+        { _id: userIdObject },
+        {
+          $set: {
+            status: 'offline',
+            lastSeen: lastSeen
+          }
+        }
+      );
+
+    
+
+      console.log(`User went offline: ${data.userId}`);
+    } catch (err) {
+      console.error('Error updating user offline status:', err);
+    }
+  });
+
+
+
+  // Handle joining a room
+  socket.on('joinRoom', (data) => {
+    if (!data.userId) return;
+    socket.join(data.userId);
+    userRooms.add(data.userId);
+    console.log(`User ${socket.id} joined room ${data.userId}`);
+  });
+
+  // Handle leaving a room
+  socket.on('leaveRoom', (data) => {
+    if (!data.userId) return;
+    socket.leave(data.userId);
+    userRooms.delete(data.userId);
+    console.log(`User ${socket.id} left room ${data.userId}`);
+  });
+
+  // Handle disconnection
+ // Handle disconnection
+ socket.on('disconnect', async () => {
+  console.log('User disconnected:', socket.id);
+
+  // Find the userId associated with this socket
+  let disconnectedUserId = null;
+  for (const [userId, socketId] of connectedUsers.entries()) {
+    if (socketId === socket.id) {
+      disconnectedUserId = userId;
+      break;
+    }
+  }
+
+  if (disconnectedUserId) {
+    try {
+      // Check if this was the last socket for this user
+      const otherSockets = await io.in(disconnectedUserId).allSockets();
+      if (otherSockets.size <= 1) { // If this was the last socket
+        const userIdObject = new ObjectId(disconnectedUserId);
+        const lastSeen = new Date();
+
+        // Update status in memory and database
+        userStatus.set(disconnectedUserId, 'offline');
+
+        // Broadcast to all users
+        io.emit('userStatusChanged', {
+          userId: disconnectedUserId,
+          status: 'offline',
+          lastSeen: lastSeen
+        });
+
+        await db.get().collection(collection.USER_COLLECTION).updateOne(
+          { _id: userIdObject },
+          {
+            $set: {
+              status: 'offline',
+              lastSeen: lastSeen
+            }
+          }
+        );
+
+
+        // Remove from connected users map
+        connectedUsers.delete(disconnectedUserId);
+        userStatus.delete(disconnectedUserId);
+      }
+    } catch (err) {
+      console.error('Error updating user disconnect status:', err);
+    }
+  }
+
+  // Clean up all rooms
+  userRooms.forEach((roomId) => {
+    socket.leave(roomId);
+  });
+  userRooms.clear();
+  console.log('Rooms cleared for socket:', socket.id);
+});
+});
+
+// Add a periodic cleanup to handle any stale connections
+setInterval(async () => {
+for (const [userId, status] of userStatus.entries()) {
+  if (status === 'online') {
+    const socketId = connectedUsers.get(userId);
+    if (!socketId || !io.sockets.sockets.has(socketId)) {
+      try {
+        const userIdObject = new ObjectId(userId);
+        await db.get().collection(collection.USER_COLLECTION).updateOne(
+          { _id: userIdObject },
+          {
+            $set: {
+              status: 'offline',
+              lastSeen: new Date()
+            }
+          }
+        );
+        connectedUsers.delete(userId);
+        userStatus.delete(userId);
+        
+        io.emit('userStatusChanged', {
+          userId: userId,
+          status: 'offline',
+          lastSeen: new Date()
+        });
+      } catch (err) {
+        console.error('Error in cleanup for user:', userId, err);
+      }
+    }
+  }
+}
+}, 30000); // Run every 30 seconds
+
+// Add a function to check if a user is actually online
+const isUserTrulyOnline = (userId) => {
+  const socketId = connectedUsers.get(userId);
+  return io.sockets.sockets.has(socketId);
+};
+
+
+
+// Server error handling
+server.listen(port);
+server.on('error', onError);
+server.on('listening', onListening);
+
+function normalizePort(val) {
+  var port = parseInt(val, 10);
+  if (isNaN(port)) {
+    return val;
+  }
+  if (port >= 0) {
+    return port;
+  }
+  return false;
+}
+
+function onError(error) {
+  if (error.syscall !== 'listen') {
+    throw error;
+  }
+
+  var bind = typeof port === 'string' ? 'Pipe ' + port : 'Port ' + port;
+
+  switch (error.code) {
+    case 'EACCES':
+      console.error(bind + ' requires elevated privileges');
+      process.exit(1);
+      break;
+    case 'EADDRINUSE':
+      console.error(bind + ' is already in use');
+      process.exit(1);
+      break;
+    default:
+      throw error;
+  }
+}
+
+function onListening() {
+  var addr = server.address();
+  var bind = typeof addr === 'string' ? 'pipe ' + addr : 'port ' + addr.port;
+  debug('Listening on ' + bind);
+}
+
+// Handle process errors
+process.on('unhandledRejection', (error) => {
+  console.error('Unhandled Promise Rejection:', error);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+});
