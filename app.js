@@ -28,45 +28,32 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // CORS Configuration
 app.use(cors({
-  origin: 'https://sample-chatapp-fqwv.onrender.com', // Your frontend URL
+  origin: 'https://sample-chatapp-fqwv.onrender.com', // Exact frontend URL
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 // Session Configuration
 const sessionMiddleware = session({
-  secret: 'your_strong_secret_key_here',
+  secret: 'your_unique_long_secret_key_here',
   resave: false,
   saveUninitialized: false,
   store: MongoStore.create({
     mongoUrl: 'mongodb+srv://ajinrajeshhillten:qs8gRldbllckrr0N@cluster0.powg3.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0',
     collectionName: 'sessions',
-    ttl: 24 * 60 * 60, // Session expires in 24 hours
-    autoRemove: 'disabled', // Manually manage session removal
-    touchAfter: 24 * 3600 // Update session only once in 24 hours
+    ttl: 24 * 60 * 60, // Session TTL (1 day)
+    autoRemove: 'interval',
+    autoRemoveInterval: 10 // Check and remove expired sessions every 10 minutes
   }),
   cookie: {
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    secure: false, // Set to true in production
+    secure: true, // Must be true for cross-site cookies
     httpOnly: true,
-    sameSite: 'lax'
+    sameSite: 'none', // Required for cross-site cookies
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
   }
 });
 
-// Custom session cleanup method
-function cleanupExpiredSessions() {
-  sessionMiddleware.store.clear((err) => {
-    if (err) {
-      console.error('Session cleanup error:', err);
-    } else {
-      console.log('Expired sessions cleared');
-    }
-  });
-}
-
-// Run cleanup periodically
-setInterval(cleanupExpiredSessions, 24 * 60 * 60 * 1000); // Every 24 hours
 app.use(sessionMiddleware);
 
 // Database connection
