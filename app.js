@@ -36,21 +36,24 @@ app.use(cors({
 
 // Session Configuration
 const sessionMiddleware = session({
-  secret: 'your_strong_secret_key_here', // Replace with a strong, unique secret
+  secret: 'your_strong_secret_key_here',
   resave: false,
   saveUninitialized: false,
   store: MongoStore.create({
     mongoUrl: 'mongodb+srv://ajinrajeshhillten:qs8gRldbllckrr0N@cluster0.powg3.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0',
     collectionName: 'sessions',
     ttl: 24 * 60 * 60, // Session TTL (1 day)
-    autoRemove: 'native',
-    touchAfter: 24 * 3600 // Time period in seconds between session updates
+    autoRemove: 'interval',
+    autoRemoveInterval: 10, // Check and remove expired sessions every 10 minutes
+    crypto: {
+      secret: 'encryption_secret_key' // Additional encryption for session store
+    }
   }),
   cookie: {
-    secure: true, // Must be true for cross-site cookies
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
-    sameSite: 'none', // Required for cross-site cookies
-    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
   }
 });
 app.use(sessionMiddleware);
