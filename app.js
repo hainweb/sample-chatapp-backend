@@ -35,27 +35,38 @@ app.use(cors({
 }));
 
 // Session Configuration
-const sessionMiddleware = session({
+const sessionMiddleware = session({const sessionMiddleware = session({
   secret: 'your_strong_secret_key_here',
   resave: false,
   saveUninitialized: false,
   store: MongoStore.create({
     mongoUrl: 'mongodb+srv://ajinrajeshhillten:qs8gRldbllckrr0N@cluster0.powg3.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0',
     collectionName: 'sessions',
-    ttl: 24 * 60 * 60, // Session TTL (1 day)
-    autoRemove: 'interval',
-    autoRemoveInterval: 10, // Check and remove expired sessions every 10 minutes
-    crypto: {
-      secret: 'encryption_secret_key' // Additional encryption for session store
-    }
+    ttl: 24 * 60 * 60, // Session expires in 24 hours
+    autoRemove: 'disabled', // Manually manage session removal
+    touchAfter: 24 * 3600 // Update session only once in 24 hours
   }),
   cookie: {
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    secure: process.env.NODE_ENV === 'production',
+    secure: false, // Set to true in production
     httpOnly: true,
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+    sameSite: 'lax'
   }
 });
+
+// Custom session cleanup method
+function cleanupExpiredSessions() {
+  sessionMiddleware.store.clear((err) => {
+    if (err) {
+      console.error('Session cleanup error:', err);
+    } else {
+      console.log('Expired sessions cleared');
+    }
+  });
+}
+
+// Run cleanup periodically
+setInterval(cleanupExpiredSessions, 24 * 60 * 60 * 1000); // Every 24 hours
 app.use(sessionMiddleware);
 
 // Database connection
