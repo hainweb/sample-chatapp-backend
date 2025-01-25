@@ -38,19 +38,39 @@ router.post('/signup', (req, res) => {
 
 
 router.post('/login', (req, res) => {
-  console.log('from react', req.body);
-
   userHelpers.doLogin(req.body).then((response) => {
     if (response.status) {
-      req.session.user = { loggedIn: true, ...response.user };
-      console.log('session', req.session.user);
-      res.json({ loggedIn: true, user: req.session.user })
-      console.log('session1', req.session.user);
-
+      // Regenerate session to prevent session fixation
+      req.session.regenerate((err) => {
+        if (err) {
+          return res.status(500).json({ error: 'Session regeneration failed' });
+        }
+        
+        req.session.user = { 
+          loggedIn: true, 
+          ...response.user 
+        };
+        
+        // Save session explicitly
+        req.session.save((saveErr) => {
+          if (saveErr) {
+            return res.status(500).json({ error: 'Session save failed' });
+          }
+          
+          res.json({ 
+            loggedIn: true, 
+            user: req.session.user 
+          });
+        });
+      });
     } else {
-      req.session.loginErr = "Invalid username or password";
-      res.json({ loggedIn: false, message: req.session.loginErr })
+      res.json({ 
+        loggedIn: false, 
+        message: "Invalid username or password" 
+      });
     }
+  }).catch((error) => {
+    res.status(500).json({ error: 'Login process failed' });
   });
 });
 
