@@ -35,7 +35,7 @@ app.use(cors({
 }));
 
 // Session Configuration
-const sessionMiddleware = session({const sessionMiddleware = session({
+const sessionMiddleware = session({
   secret: 'your_strong_secret_key_here',
   resave: false,
   saveUninitialized: false,
