@@ -43,16 +43,19 @@ const sessionMiddleware = session({
     mongoUrl: 'mongodb+srv://ajinrajeshhillten:qs8gRldbllckrr0N@cluster0.powg3.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0',
     collectionName: 'sessions',
     ttl: 24 * 60 * 60, // Session TTL (1 day)
-    autoRemove: 'interval',
-    autoRemoveInterval: 10 // Check and remove expired sessions every 10 minutes
+    autoRemove: 'native',
+    touchAfter: 24 * 3600
   }),
+  name: 'sessionId',
   cookie: {
     secure: true, // Must be true for cross-site cookies
     httpOnly: true,
     sameSite: 'none', // Required for cross-site cookies
-    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+    maxAge: 24 * 60 * 60 * 1000 ,// 24 hours
+    domain: 'sample-chatapp-backend.onrender.com'
   }
 });
+
 
 app.use(sessionMiddleware);
 
