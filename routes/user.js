@@ -2,9 +2,17 @@ var express = require('express');
 var router = express.Router();
 var userHelpers = require('../helpers/userHelpers');
 
-// Middleware to log req.session.user for every request
+// Middleware to log req.session.user when the request comes in
 router.use((req, res, next) => {
-  console.log('req.session.user:', req.session.user);
+  console.log('Incoming request. req.session.user:', req.session.user);
+  next();
+});
+
+// Middleware to log after the response is sent
+router.use((req, res, next) => {
+  res.on('finish', () => {
+    console.log('Response sent. req.session.user:', req.session.user);
+  });
   next();
 });
 
@@ -119,7 +127,7 @@ router.get('/get-chat-list', async (req, res) => {
       // Fetch the user details using the senderId from chat
       const userDetail = await userHelpers.getUser(chat.senderId);
       console.log('chatlist user details', userDetail);
-      return userDetail; // Ensure to return the userDetail for Promise.all
+      return userDetail;
     });
   
     // Wait for all the user details to be fetched
@@ -130,16 +138,14 @@ router.get('/get-chat-list', async (req, res) => {
       const chat = chatLists.find((chat) => chat.senderId === user._id.toString());
       return {
         ...user,
-        lastMessage: chat ? chat.lastMessage : null, // Attach lastMessage or null if no match
+        lastMessage: chat ? chat.lastMessage : null,
       };
     });
     console.log('updated user details', updatedUserDetails);
     
-    // Send the updated userDetails array
     res.json(updatedUserDetails);
   };
   
-  // Example usage
   await fetchUserDetails(chatLists);
 });
 
