@@ -1,31 +1,31 @@
 var express = require('express');
 var router = express.Router();
-var userHelpers = require('../helpers/userHelpers')
+var userHelpers = require('../helpers/userHelpers');
+
+// Middleware to log req.session.user for every request
+router.use((req, res, next) => {
+  console.log('req.session.user:', req.session.user);
+  next();
+});
+
 /* GET home page. */
 router.get('/', function (req, res, next) {
   res.render('index', { title: 'Express' });
 });
 
-
 router.get('/get-user', (req, res) => {
-  // console.log('sess', req.session.user);
-
   if (req.session.user) {
-    let user = req.session.user
-    // console.log('user session', user);
-    res.json({ status: true, user })
-
+    let user = req.session.user;
+    res.json({ status: true, user });
   } else {
-    res.json({ status: false })
+    res.json({ status: false });
   }
-})
-
+});
 
 router.post('/signup', (req, res) => {
   console.log('api call signup');
-
   userHelpers.doSignup(req.body).then((response1) => {
-    console.log('resoponse1', response1)
+    console.log('response1', response1);
     if (response1.status) {
       req.session.user = { loggedIn: true, ...response1.user };
       res.json({ status: true, user: req.session.user });
@@ -35,7 +35,6 @@ router.post('/signup', (req, res) => {
     }
   });
 });
-
 
 router.post('/login', (req, res) => {
   userHelpers.doLogin(req.body).then((response) => {
@@ -56,7 +55,6 @@ router.post('/login', (req, res) => {
           if (saveErr) {
             return res.status(500).json({ error: 'Session save failed' });
           }
-          
           res.json({ 
             loggedIn: true, 
             user: req.session.user 
@@ -74,62 +72,42 @@ router.post('/login', (req, res) => {
   });
 });
 
-
 router.get('/logout', (req, res) => {
   console.log('api call');
-
-  req.session.user = null
-  res.json({ logout: true })
-})
-
-
+  req.session.user = null;
+  res.json({ logout: true });
+});
 
 router.post('/find-user', (req, res) => {
   console.log('api call to find user');
   userHelpers.findUser(req.body.username).then((response) => {
-    res.json(response)
-  })
-
-})
+    res.json(response);
+  });
+});
 
 router.post('/get-user-messages', async (req, res) => {
   console.log('api call to get user message');
-  let user = await userHelpers.getUser(req.body.userId)
-  // console.log('user ', user); 
-
-  let senderId = req.session.user._id
-
-  let messages = await userHelpers.getMessages(senderId, req.body.userId)
-
-
-
-  res.json({ status: true, user, messages })
-
-})
+  let user = await userHelpers.getUser(req.body.userId);
+  let senderId = req.session.user._id;
+  let messages = await userHelpers.getMessages(senderId, req.body.userId);
+  res.json({ status: true, user, messages });
+});
 
 router.post('/send-message', (req, res) => {
   console.log('api call to send msg');
   let { receiverId, message, messageId } = req.body;
-  const senderId = req.session.user._id
-  const type = 'private'
-  //console.log('datas sender:', senderId, 'receiver', receiverId, 'message', message);
-
-
-
+  const senderId = req.session.user._id;
+  const type = 'private';
   userHelpers.addMessages(messageId, senderId, receiverId, message, type).then((response) => {
-    res.json(response)
-  })
+    res.json(response);
+  });
+});
 
- 
-})
-
-router.get('/get-chat-list',async (req, res) => {
+router.get('/get-chat-list', async (req, res) => {
   console.log('api call to get chat list');
+  const chatLists = await userHelpers.getChatList(req.session.user._id);
+  console.log('chatLists:', chatLists);
 
-  const chatLists = await userHelpers.getChatList(req.session.user._id); // Fetch chat lists based on session user's _id
-console.log('chatlstgvsbbhs',chatLists);
-
- 
   // Function to fetch details based on senderId
   const fetchUserDetails = async (chatLists) => {
     if (!chatLists || !Array.isArray(chatLists)) {
@@ -139,7 +117,7 @@ console.log('chatlstgvsbbhs',chatLists);
   
     const userDetailsPromises = chatLists.map(async (chat) => {
       // Fetch the user details using the senderId from chat
-      const userDetail = await userHelpers.getUser( chat.senderId );
+      const userDetail = await userHelpers.getUser(chat.senderId);
       console.log('chatlist user details', userDetail);
       return userDetail; // Ensure to return the userDetail for Promise.all
     });
@@ -155,22 +133,14 @@ console.log('chatlstgvsbbhs',chatLists);
         lastMessage: chat ? chat.lastMessage : null, // Attach lastMessage or null if no match
       };
     });
-    console.log('upda',updatedUserDetails);
+    console.log('updated user details', updatedUserDetails);
     
     // Send the updated userDetails array
-    res.json( updatedUserDetails );
-    
+    res.json(updatedUserDetails);
   };
   
   // Example usage
   await fetchUserDetails(chatLists);
-
-  
-
-
- 
-  
-
-})  
+});
 
 module.exports = router;
